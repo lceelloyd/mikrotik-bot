@@ -1,0 +1,1 @@
+web: python mikrotik_bot.py

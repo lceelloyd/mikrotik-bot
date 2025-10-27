@@ -1,0 +1,199 @@
+# ------------------------------
+# TELEGRAM-MIKROTIK HOTSPOT BOT (FULL FEATURED, LUV VERSION)
+# ------------------------------
+
+import telebot
+import random
+import string
+import os
+import json
+import schedule
+import time
+from routeros_api import RouterOsApiPool
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+
+# ------------------------------
+# 1. LOAD ENVIRONMENT VARIABLES
+# ------------------------------
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
+ADMIN_CHAT_ID = os.environ.get("ADMIN_CHAT_ID")
+API_HOST = os.environ.get("API_HOST")
+API_USER = os.environ.get("API_USER")
+API_PASS = os.environ.get("API_PASS")
+INTERNET_IFACE = os.environ.get("INTERNET_IFACE", "ether1")
+WIRELESS_IFACE = os.environ.get("WIRELESS_IFACE", "wlan1")
+TRACK_INTERVAL = int(os.environ.get("TRACK_INTERVAL", "1"))
+DAILY_REPORT_TIME = os.environ.get("DAILY_REPORT_TIME", "09:00")
+GOOGLE_CREDS_JSON = os.environ.get("GOOGLE_CREDS_JSON")
+SHEET_NAME = os.environ.get("SHEET_NAME", "Hotspot Logs")
+
+# ------------------------------
+# 2. TELEGRAM BOT SETUP
+# ------------------------------
+bot = telebot.TeleBot(BOT_TOKEN)
+
+# ------------------------------
+# 3. MIKROTIK API SETUP
+# ------------------------------
+api_pool = RouterOsApiPool(API_HOST, username=API_USER, password=API_PASS)
+api = api_pool.get_api()
+
+# ------------------------------
+# 4. GOOGLE SHEETS SETUP
+# ------------------------------
+creds_dict = json.loads(GOOGLE_CREDS_JSON)
+scope = ["https://spreadsheets.google.com/feeds",'https://www.googleapis.com/auth/drive']
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+client = gspread.authorize(creds)
+sheet = client.open(SHEET_NAME).sheet1
+
+# ------------------------------
+# 5. HELPER FUNCTIONS
+# ------------------------------
+def generate_voucher(length=6):
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=length))
+
+def log_to_sheet(username, mac, ip, start_time, bytes_in, bytes_out):
+    try:
+        cell = sheet.find(mac)
+        row_number = cell.row
+        sheet.update_cell(row_number, 4, bytes_in)
+        sheet.update_cell(row_number, 5, bytes_out)
+    except:
+        sheet.append_row([username, mac, ip, bytes_in, bytes_out, start_time])
+
+def send_alert(message_text):
+    # All messages to you start with "Luv"
+    bot.send_message(ADMIN_CHAT_ID, f"Luv, {message_text}")
+
+# ------------------------------
+# 6. TELEGRAM COMMANDS
+# ------------------------------
+@bot.message_handler(commands=['get_voucher'])
+def get_voucher(message):
+    code = generate_voucher()
+    api.get_resource('/ip/hotspot/user').add(
+        name=code,
+        password=code,
+        profile='default',
+        limit_uptime='1d'
+    )
+    bot.send_message(message.chat.id, f"Luv, Voucher generated:\nUsername: {code}\nPassword: {code}")
+
+@bot.message_handler(commands=['connected_users'])
+def show_users(message):
+    leases = api.get_resource('/ip/dhcp-server/lease').get()
+    users_list = ""
+    for lease in leases:
+        users_list += f"{lease['mac-address']} - {lease['address']} - {lease['status']}\n"
+    bot.send_message(message.chat.id, f"Luv, Connected users:\n{users_list}")
+
+@bot.message_handler(commands=['block'])
+def block_device(message):
+    try:
+        mac = message.text.split()[1]
+        api.get_resource('/ip/firewall/filter').add(chain='forward', src_mac_address=mac, action='drop')
+        bot.send_message(message.chat.id, f"Luv, Device {mac} blocked!")
+    except IndexError:
+        bot.send_message(message.chat.id, "Luv, Usage: /block <MAC_ADDRESS>")
+
+@bot.message_handler(commands=['unblock'])
+def unblock_device(message):
+    try:
+        mac = message.text.split()[1]
+        rules = api.get_resource('/ip/firewall/filter').get()
+        for rule in rules:
+            if rule.get('src-mac-address') == mac:
+                api.get_resource('/ip/firewall/filter').remove(id=rule['id'])
+                bot.send_message(message.chat.id, f"Luv, Device {mac} unblocked!")
+                return
+        bot.send_message(message.chat.id, "Luv, Device not found in firewall rules.")
+    except IndexError:
+        bot.send_message(message.chat.id, "Luv, Usage: /unblock <MAC_ADDRESS>")
+
+@bot.message_handler(commands=['reboot'])
+def reboot_router(message):
+    api.get_resource('/system/reboot').call()
+    bot.send_message(message.chat.id, "Luv, Router is rebooting!")
+
+@bot.message_handler(commands=['bandwidth'])
+def monitor_bandwidth(message):
+    interfaces = api.get_resource('/interface').get()
+    report = ""
+    for iface in interfaces:
+        report += f"{iface['name']}: RX {iface['rx-byte']} bytes, TX {iface['tx-byte']} bytes\n"
+    bot.send_message(message.chat.id, f"Luv, Bandwidth usage:\n{report}")
+
+@bot.message_handler(commands=['change_password'])
+def change_password(message):
+    try:
+        new_pass = message.text.split()[1]
+        api.get_resource('/interface/wireless').set(numbers=WIRELESS_IFACE, security_profile='default', wpa2_pre_shared_key=new_pass)
+        bot.send_message(message.chat.id, f"Luv, WiFi password changed to: {new_pass}")
+    except IndexError:
+        bot.send_message(message.chat.id, "Luv, Usage: /change_password <NEW_PASSWORD>")
+
+@bot.message_handler(commands=['internet_off'])
+def internet_off(message):
+    api.get_resource('/interface').set(numbers=INTERNET_IFACE, disabled='yes')
+    bot.send_message(message.chat.id, "Luv, Internet disabled!")
+
+@bot.message_handler(commands=['internet_on'])
+def internet_on(message):
+    api.get_resource('/interface').set(numbers=INTERNET_IFACE, disabled='no')
+    bot.send_message(message.chat.id, "Luv, Internet enabled!")
+
+# ------------------------------
+# 7. HOTSPOT USER TRACKING
+# ------------------------------
+tracked_users = {}
+
+def track_connected_users():
+    active_users = api.get_resource('/ip/hotspot/active').get()
+    for user in active_users:
+        mac = user['mac-address']
+        username = user['user']
+        ip = user['address']
+        bytes_in = user['bytes-in']
+        bytes_out = user['bytes-out']
+        start_time = user['uptime']
+
+        if mac not in tracked_users:
+            send_alert(f"New user connected:\n{username} - {ip} - {mac}")
+        tracked_users[mac] = {'username': username,'ip': ip,'bytes_in': bytes_in,'bytes_out': bytes_out,'start_time': start_time}
+        log_to_sheet(username, mac, ip, start_time, bytes_in, bytes_out)
+
+schedule.every(TRACK_INTERVAL).minutes.do(track_connected_users)
+
+# ------------------------------
+# 8. M-PESA PAYMENT HANDLER (PLACEHOLDER)
+# ------------------------------
+def handle_mpesa_payment(data):
+    voucher = generate_voucher()
+    api.get_resource('/ip/hotspot/user').add(name=voucher, password=voucher, profile='default', limit_uptime='1d')
+    send_alert(f"Voucher {voucher} sent to {data['phone_number']} for payment {data['amount']} KES")
+    # TODO: send voucher via SMS or Telegram
+
+# ------------------------------
+# 9. DAILY REPORT PLACEHOLDER
+# ------------------------------
+def daily_report():
+    send_alert("Daily report placeholder.")
+
+schedule.every().day.at(DAILY_REPORT_TIME).do(daily_report)
+
+# ------------------------------
+# 10. RUN BOT AND SCHEDULER
+# ------------------------------
+def run_bot():
+    while True:
+        try:
+            schedule.run_pending()
+            bot.polling(none_stop=True)
+        except Exception as e:
+            print(f"Luv, Error: {e}")
+            time.sleep(5)
+
+if __name__ == "__main__":
+    run_bot()
