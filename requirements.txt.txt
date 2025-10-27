@@ -1,5 +1,0 @@
-pyTelegramBotAPI
-routeros_api
-schedule
-gspread
-oauth2client
