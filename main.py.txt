@@ -1,0 +1,33 @@
+from telegram import Update
+from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import routeros_api
+
+# router credentials
+ROUTER_IP = "192.168.88.1"
+ROUTER_USER = "botuser"
+ROUTER_PASS = "B@lusi1"
+
+# telegram bot token
+BOT_TOKEN = "8124056082:AAFIQf0SHEsG1qB0iEhtQY8KaQuM_GxFFKU"
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Hi luv 💙! I'm connected to your MikroTik router.")
+
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        connection = routeros_api.RouterOsApiPool(
+            ROUTER_IP, username=ROUTER_USER, password=ROUTER_PASS, plaintext_login=True
+        )
+        api = connection.get_api()
+        identity = api.get_resource('/system/identity').get()[0]['name']
+        await update.message.reply_text(f"Router is up ✅\nName: {identity}")
+        connection.disconnect()
+    except Exception as e:
+        await update.message.reply_text(f"Error: {e}")
+
+app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("status", status))
+
+app.run_polling()
