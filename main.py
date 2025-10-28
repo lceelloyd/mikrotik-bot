@@ -5,7 +5,7 @@ import random
 import string
 import datetime
 
-ROUTER_IP = "192.168.88.1"
+ROUTER_IP = "mikrotik.trycloudflare.com"
 ROUTER_USER = "botuser"
 ROUTER_PASS = "B@lusi1"
 BOT_TOKEN = "8124056082:AAFIQf0SHEsG1qB0iEhtQY8KaQuM_GxFFKU"
@@ -172,3 +172,4 @@ app.add_handler(CommandHandler("changewifi", changewifi))
 app.add_handler(CommandHandler("generatecode", generatecode))
 app.add_handler(CommandHandler("report", report))
 app.run_polling()
+
