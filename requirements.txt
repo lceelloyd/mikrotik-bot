@@ -1,2 +1,2 @@
 python-telegram-bot==20.3
-routeros-api==0.18.0
+routeros_api
