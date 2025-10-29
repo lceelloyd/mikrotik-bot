@@ -1,2 +1,0 @@
-pyTelegramBotAPI
-routeros_api
