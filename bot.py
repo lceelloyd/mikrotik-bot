@@ -4,7 +4,7 @@ import telebot
 from routeros_api import RouterOsApiPool
 
 # ---- Environment variables (set on Pella) ----
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TELEGRAM_TOKEN = os.environ.get("8124056082:AAFIQf0SHEsG1qB0iEhtQY8KaQuM_GxFFKU")
 ROUTER_IP = os.environ.get("ROUTER_IP")
 ROUTER_USER = os.environ.get("ROUTER_USER")
 ROUTER_PASS = os.environ.get("ROUTER_PASS")
@@ -103,3 +103,4 @@ def block_user(message):
 
 # ---- Start bot with long polling ----
 bot.polling(none_stop=True)
+
