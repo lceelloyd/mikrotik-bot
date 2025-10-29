@@ -1,6 +1,9 @@
 import telebot
 from routeros_api import RouterOsApiPool
+from flask import Flask
+import threading
 
+# --- Telegram and Router Info ---
 BOT_TOKEN = "8124056082:AAFIQf0SHEsG1qB0iEhtQY8KaQuM_GxFFKU"
 ROUTER_IP = "102.0.15.136"
 ROUTER_USER = "botuser"
@@ -8,7 +11,14 @@ ROUTER_PASS = "lloyd!?balusi!?"
 ROUTER_PORT = 8728
 
 bot = telebot.TeleBot(BOT_TOKEN)
+app = Flask(__name__)
 
+# --- Keep-alive endpoint ---
+@app.route('/')
+def home():
+    return "Bot is alive 💙"
+
+# --- Router connection ---
 def connect_router():
     pool = RouterOsApiPool(
         host=ROUTER_IP,
@@ -20,6 +30,7 @@ def connect_router():
     api = pool.get_api()
     return api, pool
 
+# --- Bot Commands ---
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.reply_to(message, "Hey luv 💙, I’m online and ready to manage your router!")
@@ -111,5 +122,14 @@ def block_user(message):
     except Exception as e:
         bot.reply_to(message, f"Error blocking user: {e}")
 
-print("Bot is running... 💙")
-bot.polling(none_stop=True)
+# --- Run bot + web server in parallel ---
+def run_bot():
+    print("Bot is running... 💙")
+    bot.infinity_polling()
+
+def run_web():
+    app.run(host="0.0.0.0", port=10000)
+
+if __name__ == "__main__":
+    threading.Thread(target=run_bot).start()
+    run_web()
