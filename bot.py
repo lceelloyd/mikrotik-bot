@@ -1,24 +1,22 @@
+import os
 import telebot
 from routeros_api import RouterOsApiPool
 from flask import Flask
 import threading
 
-# --- Telegram and Router Info ---
-BOT_TOKEN = "8124056082:AAFIQf0SHEsG1qB0iEhtQY8KaQuM_GxFFKU"
-ROUTER_IP = "102.0.15.136"
-ROUTER_USER = "botuser"
-ROUTER_PASS = "lloyd!?balusi!?"
-ROUTER_PORT = 8728
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+ROUTER_IP = os.getenv("ROUTER_IP")
+ROUTER_USER = os.getenv("ROUTER_USER")
+ROUTER_PASS = os.getenv("ROUTER_PASS")
+ROUTER_PORT = int(os.getenv("ROUTER_PORT", 8728))
 
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-# --- Keep-alive endpoint ---
 @app.route('/')
 def home():
     return "Bot is alive 💙"
 
-# --- Router connection ---
 def connect_router():
     pool = RouterOsApiPool(
         host=ROUTER_IP,
@@ -30,7 +28,6 @@ def connect_router():
     api = pool.get_api()
     return api, pool
 
-# --- Bot Commands ---
 @bot.message_handler(commands=['start'])
 def start(message):
     bot.reply_to(message, "Hey luv 💙, I’m online and ready to manage your router!")
@@ -38,7 +35,6 @@ def start(message):
 @bot.message_handler(commands=['help'])
 def help_command(message):
     help_text = (
-        "Hey luv 💙, here’s what I can do:\n\n"
         "/status - Show router status\n"
         "/reboot - Reboot your router\n"
         "/getvouchers - List hotspot users\n"
@@ -51,14 +47,10 @@ def help_command(message):
 def status(message):
     try:
         api, pool = connect_router()
-        system_resource = api.get_resource('/system/resource').get()[0]
-        status_msg = (
-            f"💻 CPU Load: {system_resource['cpu-load']}%\n"
-            f"🧠 Free Memory: {system_resource['free-memory']}\n"
-            f"⏱️ Uptime: {system_resource['uptime']}"
-        )
+        r = api.get_resource('/system/resource').get()[0]
+        msg = f"💻 CPU Load: {r['cpu-load']}%\n🧠 Free Memory: {r['free-memory']}\n⏱️ Uptime: {r['uptime']}"
         pool.disconnect()
-        bot.reply_to(message, f"Here you go, luv 💙\n\n{status_msg}")
+        bot.reply_to(message, msg)
     except Exception as e:
         bot.reply_to(message, f"Error connecting to router: {e}")
 
@@ -76,10 +68,10 @@ def reboot(message):
 def get_vouchers(message):
     try:
         api, pool = connect_router()
-        hotspot_users = api.get_resource('/ip/hotspot/user').get()
+        users = api.get_resource('/ip/hotspot/user').get()
         pool.disconnect()
-        if hotspot_users:
-            reply = "💳 Hotspot Users:\n" + "\n".join([u['name'] for u in hotspot_users])
+        if users:
+            reply = "💳 Hotspot Users:\n" + "\n".join([u['name'] for u in users])
         else:
             reply = "No hotspot users found, luv 💙"
         bot.reply_to(message, reply)
@@ -110,10 +102,10 @@ def block_user(message):
             return
         username = parts[1]
         api, pool = connect_router()
-        user_resource = api.get_resource('/ip/hotspot/user')
-        user_list = user_resource.get(name=username)
+        res = api.get_resource('/ip/hotspot/user')
+        user_list = res.get(name=username)
         if user_list:
-            user_resource.set(id=user_list[0]['.id'], disabled="true")
+            res.set(id=user_list[0]['.id'], disabled="true")
             reply = f"User '{username}' blocked, luv 💙"
         else:
             reply = f"User '{username}' not found, luv 💙"
@@ -122,7 +114,6 @@ def block_user(message):
     except Exception as e:
         bot.reply_to(message, f"Error blocking user: {e}")
 
-# --- Run bot + web server in parallel ---
 def run_bot():
     print("Bot is running... 💙")
     bot.infinity_polling()
@@ -133,3 +124,5 @@ def run_web():
 if __name__ == "__main__":
     threading.Thread(target=run_bot).start()
     run_web()
+
+
